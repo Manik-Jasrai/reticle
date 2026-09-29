@@ -30,19 +30,27 @@ function bridgeOrigins(port: number): string[] {
 /**
  * The `connect-src` directive's source list, or undefined when the text declares none.
  *
- * Matches to the end of the directive (`;`) or the end of the enclosing quoted string, which is how
- * these are written in both a Next `headers()` value and a `<meta content="...">`.
+ * Matches every occurrence to the end of the directive (`;`) or the end of the enclosing quoted
+ * string, which is how these are written in both a Next `headers()` value and a `<meta content="...">`.
  */
 function directiveSources(text: string, directive: string): string[] | undefined {
   // Stops at the directive separator or the closing double quote of the enclosing string. Single
   // quotes are NOT terminators: `'self'` is a source, not the end of the list.
-  const match = new RegExp(`${directive}([^;"]*)`, 'i').exec(text);
-  const list = match?.[1];
-  if (list === undefined) return undefined;
-  return list
-    .split(/\s+/)
-    .map((source) => source.trim())
-    .filter((source) => source.length > 0);
+  const sources: string[] = [];
+  const matches = text.matchAll(new RegExp(`${directive}([^;"]*)`, 'gi'));
+  let found = false;
+  for (const match of matches) {
+    found = true;
+    const directiveText = match[1];
+    if (directiveText === undefined) continue;
+    sources.push(
+      ...directiveText
+        .split(/\s+/)
+        .map((source) => source.trim())
+        .filter((source) => source.length > 0),
+    );
+  }
+  return found ? sources : undefined;
 }
 
 /**
@@ -58,7 +66,8 @@ function directiveSources(text: string, directive: string): string[] | undefined
  * Still undefined when NEITHER is present — a policy that constrains neither is not blocking us.
  */
 function connectSrcSources(text: string): string[] | undefined {
-  return directiveSources(text, 'connect-src') ?? directiveSources(text, 'default-src');
+  const sources = directiveSources(text, 'connect-src') ?? directiveSources(text, 'default-src');
+  return sources?.map((source) => source.replace(/^["'`]+|["'`]+$/g, ''));
 }
 
 /**

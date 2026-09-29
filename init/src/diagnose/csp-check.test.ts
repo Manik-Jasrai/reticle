@@ -33,6 +33,25 @@ describe('cspConnectSrcProblem', () => {
     expect(cspConnectSrcProblem(source, PORT)).toBeUndefined();
   });
 
+  it('accepts development bridge origins embedded in a template literal expression', () => {
+    const source = `
+      const dev = process.env.NODE_ENV === 'development';
+      const csp = \`default-src 'self'; connect-src 'self' \${dev ? 'ws://localhost:4400 ws://127.0.0.1:4400' : ''}\`;
+    `;
+
+    expect(cspConnectSrcProblem(source, PORT)).toBeUndefined();
+  });
+
+  it('accepts bridge origins in any connect-src occurrence, including a ternary second branch', () => {
+    const source = `
+      const csp = production
+        ? "connect-src 'self' https://api.example.com"
+        : "connect-src 'self' ws://localhost:4400 ws://127.0.0.1:4400";
+    `;
+
+    expect(cspConnectSrcProblem(source, PORT)).toBeUndefined();
+  });
+
   it('flags a connect-src that excludes the bridge', () => {
     const source = `value: "default-src 'self'; connect-src 'self' https://api.example.com"`;
     expect(cspConnectSrcProblem(source, PORT)).toBeDefined();
