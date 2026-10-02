@@ -252,7 +252,7 @@ function withBridgeOrigins(policy: string, port: number): string {
   }
   // No connect-src: the socket falls back to default-src, so the new directive starts from what
   // default-src already allowed — adding it bare would take 'self' away from every fetch the app does.
-  const fallback = directiveSources(policy, 'default-src') ?? [];
+  const fallback: readonly string[] = directiveSources(policy, 'default-src')?.[0]?.sources ?? [];
   const added = ` connect-src ${[...fallback, ...origins].join(' ')}`;
   const trimmed = policy.trimEnd();
   return trimmed.endsWith(';') ? `${trimmed}${added};` : `${trimmed};${added}`;
