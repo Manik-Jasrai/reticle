@@ -1,3 +1,4 @@
+import { TEST_BRIDGE_PORT } from '../gate-harness.mjs';
 // Drive the real Next.js app (apps/next-smoke, :3100) with Reticle to de-risk Next.
 import { chromium } from 'playwright';
 import { start, TOOLS, BaselineStore, RecordingStore } from '@reticlehq/server';
@@ -22,7 +23,7 @@ const refOf = async (by, value, name) => {
   throw new Error(`not found ${by}=${value}`);
 };
 
-const server = await start({ port: 4400, mcp: false });
+const server = await start({ port: TEST_BRIDGE_PORT, mcp: false });
 deps.sessions = server.bridge.sessions;
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
@@ -135,7 +136,8 @@ const tagged = await T('reticle_assert', {
 });
 check(
   'two distinct actions in one click are not reported as a duplicate write',
-  tagged.pass === true && tagged.verified !== 'unknown',
+  // `yes` only: `no-fault` would also pass `!== 'unknown'`, and it means nothing was proved.
+  tagged.pass === true && tagged.verified === 'yes',
   `pass=${String(tagged.pass)} verified=${String(tagged.verified)} ${tagged.failureReason ?? ''}`,
 );
 

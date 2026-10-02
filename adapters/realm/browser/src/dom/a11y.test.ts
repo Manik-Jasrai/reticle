@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { getAccessibleName, isVisible } from './a11y.js';
+import { installShadowRegistry } from './shadow-registry.js';
 
 describe('name from content for roles that allow it', () => {
   // A segmented filter written as `<button role="radio">held</button>` is an extremely ordinary
@@ -233,6 +234,112 @@ describe('visibility composes across a shadow boundary', () => {
   });
 });
 
+describe('slotted content inherits visibility from where it is slotted', () => {
+  /**
+   * A light-DOM child renders at its slot, so a `<details>` around the slot inside the host's shadow
+   * root is its ancestor on screen, though never in `parentElement` (#1175). The walk went from the
+   * child straight to the host, and the closed disclosure hid nothing.
+   */
+  function mountSlotted(open: boolean): {
+    host: HTMLElement;
+    child: HTMLElement;
+    kept: HTMLElement;
+  } {
+    const host = document.createElement('div');
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML =
+      '<details><summary><slot name="label"></slot></summary><slot></slot></details>';
+    if (open) shadow.querySelector('details')?.setAttribute('open', '');
+    const kept = document.createElement('span');
+    kept.slot = 'label';
+    kept.textContent = 'Advanced';
+    const child = document.createElement('button');
+    child.textContent = 'Reset';
+    host.append(kept, child);
+    document.body.append(host);
+    return { host, child, kept };
+  }
+
+  it('hides content slotted into a closed details', () => {
+    const { host, child } = mountSlotted(false);
+    try {
+      expect(isVisible(child)).toBe(false);
+    } finally {
+      host.remove();
+    }
+  });
+
+  it('keeps content slotted into the summary visible, as a browser does', () => {
+    const { host, kept } = mountSlotted(false);
+    try {
+      expect(isVisible(kept)).toBe(true);
+    } finally {
+      host.remove();
+    }
+  });
+
+  it('shows the slotted content once the details is open', () => {
+    const { host, child } = mountSlotted(true);
+    try {
+      expect(isVisible(child)).toBe(true);
+    } finally {
+      host.remove();
+    }
+  });
+});
+
+describe('slotted into a closed details in a CLOSED shadow root', () => {
+  /**
+   * `assignedSlot` is null for a closed root by design, so the walk cannot learn the slot from the
+   * child. A root the registry captured can still be asked from inside, which is how the closed
+   * variant of #1175 is answered; an uncaptured closed root stays unreadable, as it always was.
+   */
+  let uninstall: (() => void) | undefined;
+  afterEach(() => {
+    uninstall?.();
+    uninstall = undefined;
+  });
+
+  function mountClosed(): { host: HTMLElement; child: HTMLElement } {
+    const host = document.createElement('div');
+    const shadow = host.attachShadow({ mode: 'closed' });
+    shadow.innerHTML = '<details><summary>More</summary><slot></slot></details>';
+    const child = document.createElement('button');
+    child.textContent = 'Reset';
+    host.append(child);
+    document.body.append(host);
+    return { host, child };
+  }
+
+  it('hides the child when the registry captured the closed root', () => {
+    uninstall = installShadowRegistry();
+    const { host, child } = mountClosed();
+    try {
+      expect(isVisible(child)).toBe(false);
+    } finally {
+      host.remove();
+    }
+  });
+});
+
+describe('a summary is found by its local name, so XHTML reads the same', () => {
+  it('keeps a lowercase-tagName summary of a closed details visible', () => {
+    const doc = document.implementation.createDocument('http://www.w3.org/1999/xhtml', 'html');
+    const body = doc.createElementNS('http://www.w3.org/1999/xhtml', 'body');
+    doc.documentElement.append(body);
+    const details = doc.createElementNS('http://www.w3.org/1999/xhtml', 'details');
+    const summary = doc.createElementNS('http://www.w3.org/1999/xhtml', 'summary');
+    summary.textContent = 'More';
+    details.append(summary);
+    body.append(details);
+    expect(summary.tagName).toBe('summary');
+    const label = doc.createElementNS('http://www.w3.org/1999/xhtml', 'span');
+    summary.append(label);
+
+    expect(isVisible(label)).toBe(true);
+  });
+});
+
 describe('label for> on a labelable element other than input/textarea/select', () => {
   /**
    * `<button>` is a labelable element (as are `<meter>`, `<output>` and `<progress>`), and a native
@@ -314,6 +421,30 @@ describe('the labels read is scoped to labelable elements', () => {
     });
     expect(() => getAccessibleName(el)).not.toThrow();
     expect(getAccessibleName(el)).toBe('held');
+  });
+});
+
+describe('adjacent text nodes do not get spurious spaces (#1254)', () => {
+  it('concatenates adjacent text nodes without inserting spaces', () => {
+    const button = document.createElement('button');
+    button.append('Complete All (', '2', ')');
+    expect(getAccessibleName(button)).toBe('Complete All (2)');
+  });
+
+  it('still separates an image alt from adjacent text', () => {
+    const button = document.createElement('button');
+    const img = document.createElement('img');
+    img.setAttribute('alt', 'Close');
+    button.append(img, 'Dialog');
+    expect(getAccessibleName(button)).toBe('Close Dialog');
+  });
+
+  it('separates text around an inline element', () => {
+    const button = document.createElement('button');
+    const em = document.createElement('em');
+    em.textContent = 'bold';
+    button.append('Make ', em, ' text');
+    expect(getAccessibleName(button)).toBe('Make bold text');
   });
 });
 

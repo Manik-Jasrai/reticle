@@ -32,6 +32,13 @@ export const MCP_SHUTDOWN_EVENT = 'reticle-shutdown';
 /** Local-only daemon introspection — `reticle status` GETs this for sessions + health at a glance. */
 export const STATUS_PATH = '/status';
 /**
+ * Query flag on STATUS_PATH: the caller (a running `reticle init`) is waiting on this daemon, so it
+ * must not idle out yet. Without it the daemon init started exited mid-wait on a slow desktop build.
+ */
+export const STATUS_HOLD_QUERY = 'hold';
+/** How long one hold lasts. The holder renews it well inside this window for as long as it waits. */
+export const STATUS_HOLD_MS = 60_000;
+/**
  * Local-only drive request — `reticle drive <url>` POSTs `{url}` here when a daemon already owns the
  * bridge port, and gets back the pooled session that daemon opened. The CLI asks instead of binding,
  * so the two never fight over the port. Same trust tier as STATUS_PATH.
@@ -261,6 +268,43 @@ export function cloudUrlFrom(env: Record<string, string | undefined>): string | 
   return short !== undefined && 0 < short.length ? short : undefined;
 }
 
+/** The hosted platform: where every client dials when nothing names another host. */
+export const DEFAULT_PLATFORM_URL = 'https://app.reticle.sh';
+
+/** The platform URL from the environment, else the hosted service. No trailing slash. */
+export function platformUrlFrom(env: Record<string, string | undefined>): string {
+  // A loop, not /\/+$/: that pattern is polynomial on a value made of many slashes.
+  let url = cloudUrlFrom(env) ?? DEFAULT_PLATFORM_URL;
+  while (url.endsWith('/')) url = url.slice(0, -1);
+  return url;
+}
+
+/**
+ * The platform credential the environment carries, or undefined when it carries no key.
+ *
+ * The key alone is enough: the URL falls back to the hosted service. Every reader of the env key
+ * goes through here, because each of them used to demand a URL as well, and a CI job that set only
+ * the key — which is what the platform tells it to do — silently reached nothing.
+ */
+export function platformCredentialFrom(
+  env: Record<string, string | undefined>,
+): { url: string; apiKey: string } | undefined {
+  const apiKey = apiKeyFrom(env);
+  return apiKey === undefined ? undefined : { url: platformUrlFrom(env), apiKey };
+}
+
+/**
+ * How many runs one `POST /v1/sync` may carry, by count and by serialized size.
+ *
+ * One request used to carry every unsent run, so a backlog bigger than the platform's body limit
+ * was refused whole, offered again next cycle, and never caught up. The byte bound sits well under
+ * that limit because flows, capsules and derived records ride in the first request too.
+ */
+export const SYNC_BATCH_LIMITS = {
+  MAX_RUNS: 50,
+  MAX_BYTES: 4 * 1024 * 1024,
+} as const;
+
 /** Hard transport bounds shared by the browser and bridge. */
 export const TRANSPORT_LIMITS = {
   MAX_MESSAGE_BYTES: 1024 * 1024,
@@ -409,6 +453,8 @@ export const ReticleDir = {
   AMBIENT_FILE: 'ambient.json',
   /** per-flow flake ledger — replay outcomes that decide intermittent-failure quarantine. */
   FLAKE_FILE: 'flake.json',
+  /** The app-wide coverage ledger — see server features/exhaust/ledger.ts. */
+  COVERAGE_FILE: 'coverage.json',
   /**
    * the project's cloud binding — .reticle/cloud.json, written by `reticle link`. Git-checked and
    * non-secret: the project id, the API origin, and where its dashboard lives. The KEY lives in
@@ -759,7 +805,6 @@ export const ActionType = {
    * merely looks like zoom would report it caught while the layout viewport never changed.
    */
   ZOOM: 'zoom',
-  WEBMCP: 'webmcp',
 } as const;
 export type ActionType = (typeof ActionType)[keyof typeof ActionType];
 
