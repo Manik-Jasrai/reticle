@@ -102,6 +102,13 @@ describe('cspConnectSrcProblem', () => {
     expect(problem).toContain('ws://127.0.0.1:4400');
   });
 
+  it('names only the origin missing from a blocking policy', () => {
+    const problem = cspConnectSrcProblem(`connect-src 'self' ws://localhost:4400`, PORT) ?? '';
+
+    expect(problem).toContain('bridge: ws://127.0.0.1:4400 is missing');
+    expect(problem).not.toContain('bridge: ws://localhost:4400');
+  });
+
   it('checks the port the daemon is actually on, not a hardcoded one', () => {
     const problem = cspConnectSrcProblem(`connect-src 'self'`, 4711) ?? '';
     expect(problem).toContain('4711');

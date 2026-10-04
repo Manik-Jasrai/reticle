@@ -96,22 +96,37 @@ export function cspConnectSrcProblem(text: string, port: number): string | undef
   // Separate CSP policies are all enforced, so every group must admit the bridge. Two occurrences
   // that are alternate branches of one source-level ternary are not enforced together: either
   // branch admitting the bridge is enough for that group.
-  const policiesThatAdmitBridge: boolean[] = [];
+  const missingByPolicyGroup: string[][] = [];
   for (const { sources: sourceList, alternativeWithPrevious } of sources) {
-    const admitsBridge =
-      sourceList.some((source) => WILDCARDS.includes(source)) ||
-      wanted.every((origin) => sourceList.includes(origin));
+    const missingFromSourceList = sourceList.some((source) => WILDCARDS.includes(source))
+      ? []
+      : wanted.filter((origin) => !sourceList.includes(origin));
     if (alternativeWithPrevious) {
-      policiesThatAdmitBridge[policiesThatAdmitBridge.length - 1] ||= admitsBridge;
+      const previousIndex = missingByPolicyGroup.length - 1;
+      const previousMissing = missingByPolicyGroup[previousIndex];
+      if (previousMissing === undefined) {
+        missingByPolicyGroup.push(missingFromSourceList);
+      } else {
+        // Either complete branch makes this conditional group safe. If both branches block, retain
+        // every origin needed to make either possible policy admit the bridge.
+        missingByPolicyGroup[previousIndex] =
+          0 === previousMissing.length || 0 === missingFromSourceList.length
+            ? []
+            : wanted.filter(
+                (origin) =>
+                  previousMissing.includes(origin) || missingFromSourceList.includes(origin),
+              );
+      }
     } else {
-      policiesThatAdmitBridge.push(admitsBridge);
+      missingByPolicyGroup.push(missingFromSourceList);
     }
   }
   // BOTH, not either: the SDK picks its host from how the page was served, and a policy that admits
   // one is a coin flip. A coin flip that fails is indistinguishable from every other silent
   // non-connect, which is the whole cost being avoided here.
-  if (policiesThatAdmitBridge.every(Boolean)) return undefined;
-  const missing = wanted;
+  const blockingGroups = missingByPolicyGroup.filter((missing) => 0 < missing.length);
+  if (0 === blockingGroups.length) return undefined;
+  const missing = wanted.filter((origin) => blockingGroups.some((group) => group.includes(origin)));
   return (
     `this app declares a Content-Security-Policy whose \`connect-src\` does not admit the Reticle ` +
     `bridge: ${missing.join(' and ')} ${1 === missing.length ? 'is' : 'are'} missing. The browser ` +
